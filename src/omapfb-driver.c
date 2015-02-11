@@ -164,6 +164,20 @@ OMAPFBProbeController(char *ctrl_name)
 	xf86Msg(X_INFO, "LCD controller: %s\n", ctrl_name);
 }
 
+//! Panning support via AdjustFrame
+static void
+OMAPFBAdjustFrame(int scrnIndex, int x, int y, int flags)
+{
+   ScrnInfoPtr pScrn = xf86Screens[scrnIndex];
+   OMAPFBPtr ofb = OMAPFB(pScrn);
+   ofb->state_info.xres_virtual = pScrn->displayWidth; // safety
+   ofb->state_info.yres_virtual = pScrn->virtualY;     // precautions
+   ofb->state_info.xoffset = pScrn->frameX0 = x;
+   ofb->state_info.yoffset = pScrn->frameY0 = y;
+   ioctl(ofb->fd, FBIOPUT_VSCREENINFO, &ofb->state_info);
+}
+
+
 static Bool
 OMAPFBProbe(DriverPtr drv, int flags)
 {
@@ -231,6 +245,7 @@ OMAPFBProbe(DriverPtr drv, int flags)
 			pScrn->PreInit       = OMAPFBPreInit;
 			pScrn->ScreenInit    = OMAPFBScreenInit;
 			pScrn->SwitchMode    = OMAPFBSwitchMode;
+			pScrn->AdjustFrame   = OMAPFBAdjustFrame; //!
 			pScrn->EnterVT       = OMAPFBEnterVT;
 			pScrn->LeaveVT       = OMAPFBLeaveVT;
 
@@ -349,7 +364,18 @@ OMAPFBPreInit(ScrnInfoPtr pScrn, int flags)
 	/* Start with configured virtual size */
 	pScrn->virtualX = pScrn->display->virtualX;
 	pScrn->virtualY = pScrn->display->virtualY;
-	pScrn->displayWidth = ofb->state_info.xres;
+
+	//!
+	//pScrn->displayWidth = ofb->state_info.xres;
+	ofb->state_info.xres_virtual = pScrn->virtualX;
+	ofb->state_info.yres_virtual = pScrn->virtualY;
+	pScrn->displayWidth = pScrn->virtualX;
+	ioctl(ofb->fd, FBIOPUT_VSCREENINFO, &ofb->state_info);
+	//!
+
+
+   xf86Msg(X_INFO, "%s: display(%d %d), clamp(%d %d), pitch %d\n", __FUNCTION__,
+   pScrn->virtualX,pScrn->virtualY,ofb->state_info.xres,ofb->state_info.yres,pScrn->displayWidth);
 
 	/* Clamp to actual resolution */
 	if (pScrn->virtualX < ofb->state_info.xres)
@@ -362,9 +388,12 @@ OMAPFBPreInit(ScrnInfoPtr pScrn, int flags)
 	pScrn->frameY0 = 0;
 	pScrn->frameX1 = ofb->state_info.xres;
 	pScrn->frameY1 = ofb->state_info.yres;
-
-	pScrn->maxVValue = ofb->state_info.xres;
-	pScrn->maxHValue = ofb->state_info.yres;
+	
+	pScrn->maxVValue = pScrn->virtualY;
+	pScrn->maxHValue = pScrn->virtualX;
+	
+   xf86Msg(X_INFO, "%s: viewport(%d %d), maxhw(%d %d)\n", __FUNCTION__,
+   pScrn->frameX1,pScrn->frameY1,pScrn->maxVValue,pScrn->maxHValue);
 
 	/* Setup default mode as the mode the fb is in on startup, *usually*
 	 * it'll be the one we want anyway
@@ -577,6 +606,7 @@ OMAPFBScreenInit(int scrnIndex, ScreenPtr pScreen, int argc, char **argv)
 	OMAPFBXvScreenInit(pScreen);
 	
 	/* TODO: RANDR support */
+	//! xf86CrtcPtr crtc = xf86CrtcCreate(pScrn, &omap_crtc_funcs);
 	
 	return TRUE;
 }
@@ -587,7 +617,7 @@ set_mode(OMAPFBPtr ofb, DisplayModePtr mode)
 {
 #ifdef ENFORCE_MODES
 	struct fb_var_screeninfo var;
-	
+
 	var = ofb->state_info;
 
 	var.xres = mode->HDisplay;
@@ -770,11 +800,20 @@ OMAPFBPrintCapabilities(ScrnInfoPtr pScrn,
 	           );
 }
 
+
 /*** Unimplemented: */
 
 static Bool
 OMAPFBEnterVT(int scrnIndex, int flags)
 {
+   //!
+   ScrnInfoPtr pScrn = xf86Screens[scrnIndex];
+   OMAPFBPtr ofb = OMAPFB(pScrn);
+   ofb->state_info.xres_virtual = pScrn->displayWidth;
+   ofb->state_info.yres_virtual = pScrn->virtualY;
+   ioctl(ofb->fd, FBIOPUT_VSCREENINFO, &ofb->state_info);
+   //!
+
 	xf86Msg(X_NOT_IMPLEMENTED, "%s\n", __FUNCTION__);
 	return TRUE;
 }
